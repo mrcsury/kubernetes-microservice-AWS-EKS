@@ -10,11 +10,11 @@ spec:
   ingressClassName: nginx
   tls:
     - hosts:
-        - amazontechspace.com
-        - www.amazontechspace.com
-      secretName: amazontechspace-tls
+        - bharathonlineshopping.com
+        - www.bharathonlineshopping.com
+      secretName: bharathonlineshopping-tls
   rules:
-    - host: amazontechspace.com
+    - host: bharathonlineshopping.com
       http:
         paths:
           - path: /api/auth
@@ -45,7 +45,7 @@ spec:
                 name: frontend
                 port:
                   number: 80
-    - host: www.amazontechspace.com
+    - host: www.bharathonlineshopping.com
       http:
         paths:
           - path: /api/auth

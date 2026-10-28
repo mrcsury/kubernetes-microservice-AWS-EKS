@@ -5,9 +5,9 @@ on:
     branches: [master]
 
 env:
-  AWS_REGION: us-west-2
+  AWS_REGION: ap-south-1
   EKS_CLUSTER: project-k8s-cluster
-  AWS_ACCOUNT_ID: 508262720940
+  AWS_ACCOUNT_ID: 769093516181
 
 jobs:
   detect-changes:

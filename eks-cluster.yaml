@@ -3,17 +3,25 @@ kind: ClusterConfig
 
 metadata:
   name: blog-cluster
-  region: us-west-2
-  version: "1.31"
+  region: ap-south-1
+  version: "1.35"  # newest version supported by eksctl 0.231.0
+
+# EKS requires the control plane to span at least two AZs;
+# worker nodes are pinned to ap-south-1a below.
+availabilityZones:
+  - ap-south-1a
+  - ap-south-1b
 
 managedNodeGroups:
   - name: blog-workers
+    availabilityZones:
+      - ap-south-1a
     instanceType: t3.medium
     minSize: 3
     maxSize: 3
     desiredCapacity: 3
     volumeSize: 20
-    amiFamily: AmazonLinux2
+    amiFamily: AmazonLinux2023
     iam:
       withAddonPolicies:
         autoScaler: true

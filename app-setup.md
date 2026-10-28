@@ -30,11 +30,11 @@ AWS ALB (Application Load Balancer)
 ## Environment Variables (set once, reuse everywhere)
 
 ```bash
-export AWS_ACCOUNT_ID=508262720940
-export AWS_REGION=us-west-2
+export AWS_ACCOUNT_ID=769093516181
+export AWS_REGION=ap-south-1
 export CLUSTER_NAME=blog-cluster
 export ECR_REGISTRY=$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com
-export APP_DOMAIN=amazontechspace.com
+export APP_DOMAIN=bharathonlineshopping.com
 
 # RDS
 export RDS_IDENTIFIER=blog-platform-db
@@ -57,7 +57,7 @@ sudo installer -pkg AWSCLIV2.pkg -target /            # macOS
 
 # Configure AWS credentials
 aws configure
-# Enter: AWS Access Key ID, Secret Access Key, Region (us-west-2), Output format (json)
+# Enter: AWS Access Key ID, Secret Access Key, Region (ap-south-1), Output format (json)
 
 # eksctl
 brew tap weaveworks/tap
@@ -535,7 +535,7 @@ In your DNS provider (Route 53, Cloudflare, etc.), create a CNAME record:
 
 ```
 Type:  CNAME
-Name:  amazontechspace.com   (or @ for root)
+Name:  bharathonlineshopping.com   (or @ for root)
 Value: <ALB_DNS from above>
 TTL:   300
 ```
@@ -544,7 +544,7 @@ If using **Route 53**:
 ```bash
 # Get your hosted zone ID
 export ZONE_ID=$(aws route53 list-hosted-zones \
-  --query "HostedZones[?Name=='amazontechspace.com.'].Id" \
+  --query "HostedZones[?Name=='bharathonlineshopping.com.'].Id" \
   --output text | cut -d'/' -f3)
 
 # Create the record
@@ -554,7 +554,7 @@ aws route53 change-resource-record-sets \
     \"Changes\": [{
       \"Action\": \"UPSERT\",
       \"ResourceRecordSet\": {
-        \"Name\": \"amazontechspace.com\",
+        \"Name\": \"bharathonlineshopping.com\",
         \"Type\": \"CNAME\",
         \"TTL\": 300,
         \"ResourceRecords\": [{\"Value\": \"$ALB_DNS\"}]
@@ -583,7 +583,7 @@ kubectl get hpa -n blog
 # Test each endpoint
 curl http://$APP_DOMAIN/api/auth/health
 curl http://$APP_DOMAIN/api/posts/health
-# (Open browser) http://amazontechspace.com
+# (Open browser) http://bharathonlineshopping.com
 ```
 
 Expected pod output:
