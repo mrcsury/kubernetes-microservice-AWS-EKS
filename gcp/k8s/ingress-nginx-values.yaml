@@ -1,0 +1,6 @@
+﻿controller:
+  service:
+    type: LoadBalancer
+    externalTrafficPolicy: Local
+    annotations:
+      cloud.google.com/l4-rbs: "enabled"
