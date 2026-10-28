@@ -12,29 +12,67 @@ This beginner-friendly guide deploys the existing application to Google Cloud us
 
 ## Contents
 
-1. [Before starting](#1-before-starting)
-2. [Choose project values](#2-choose-project-values)
-3. [Prepare the Google Cloud project](#3-prepare-the-google-cloud-project)
-4. [Create the VPC and subnet](#4-create-the-vpc-and-subnet-in-the-console)
-5. [Set up private access and Cloud NAT](#5-set-up-private-access-and-cloud-nat-in-the-console)
-6. [Create Artifact Registry repositories](#6-create-artifact-registry-repositories-in-the-console)
-7. [Build and push images](#7-build-and-push-images-with-docker-desktop)
-8. [Create Cloud SQL](#8-create-cloud-sql-for-mysql-in-the-console)
-9. [Create GKE Standard](#9-create-gke-standard-in-the-console)
-10. [Install local tools and connect](#10-install-local-tools-and-connect)
-11. [Set image names](#11-set-image-names-in-the-gcp-manifests)
-12. [Create namespace and Secret](#12-create-the-namespace-and-database-secret)
-13. [Check database connectivity](#13-check-private-database-connectivity)
-14. [Create database tables](#14-create-database-tables-with-prisma-jobs)
-15. [Deploy the applications](#15-deploy-the-four-applications)
-16. [Reserve the ingress IP and install NGINX Ingress](#16-reserve-the-ingress-ip-and-install-nginx-ingress)
-17. [Use GoDaddy and Cloud DNS](#17-use-godaddy-and-cloud-dns)
-18. [Enable HTTPS](#18-enable-https-with-cert-manager)
-19. [Verify](#19-verify-the-application)
-20. [Clean up](#20-clean-up)
-21. [Troubleshooting](#21-troubleshooting)
+1. [How the deployment works](#1-how-the-deployment-works)
+2. [Before starting](#2-before-starting)
+3. [Choose project values](#3-choose-project-values)
+4. [Prepare the Google Cloud project](#4-prepare-the-google-cloud-project)
+5. [Create the VPC and subnet](#5-create-the-vpc-and-subnet-in-the-console)
+6. [Set up private access and Cloud NAT](#6-set-up-private-access-and-cloud-nat-in-the-console)
+7. [Create Artifact Registry repositories](#7-create-artifact-registry-repositories-in-the-console)
+8. [Build and push images](#8-build-and-push-images-with-docker-desktop)
+9. [Create Cloud SQL](#9-create-cloud-sql-for-mysql-in-the-console)
+10. [Create GKE Standard](#10-create-gke-standard-in-the-console)
+11. [Install local tools and connect](#11-install-local-tools-and-connect)
+12. [Set image names](#12-set-image-names-in-the-gcp-manifests)
+13. [Create namespace and Secret](#13-create-the-namespace-and-database-secret)
+14. [Check database connectivity](#14-check-private-database-connectivity)
+15. [Create database tables](#15-create-database-tables-with-prisma-jobs)
+16. [Deploy the applications](#16-deploy-the-four-applications)
+17. [Reserve the ingress IP and install NGINX Ingress](#17-reserve-the-ingress-ip-and-install-nginx-ingress)
+18. [Use GoDaddy and Cloud DNS](#18-use-godaddy-and-cloud-dns)
+19. [Enable HTTPS](#19-enable-https-with-cert-manager)
+20. [Verify](#20-verify-the-application)
+21. [Clean up](#21-clean-up)
+22. [Troubleshooting](#22-troubleshooting)
 
-## 1. Before starting
+## 1. How the deployment works
+
+```text
+Browser --HTTPS--> GoDaddy domain delegation --> Cloud DNS --> GKE external passthrough Network Load Balancer
+                                                            --> NGINX Ingress Controller
+                                                                |-- /api/auth/*     --> auth-service (port 3001)
+                                                                |-- /api/posts/*    --> post-service (port 3002)
+                                                                |-- /api/comments/* --> comment-service (port 3003)
+                                                                `-- other paths     --> frontend (port 80)
+
+post-service and comment-service --internal HTTP--> auth-service
+auth-service    --> Cloud SQL private IP: auth_db
+post-service    --> Cloud SQL private IP: posts_db
+comment-service --> Cloud SQL private IP: comments_db
+```
+
+When someone opens your site, Cloud DNS resolves your domain to the reserved external IP. The GKE load balancer sends web traffic to the NGINX Ingress Controller. Ingress routes API paths to the matching Kubernetes Service and sends other paths to the frontend. The frontend calls the APIs using same-domain paths, so it uses the same domain and HTTPS address.
+
+Each backend service uses its own database on the private Cloud SQL instance. The post and comment services also call the auth service inside the cluster to validate tokens and look up author names. The browser does not connect directly to Cloud SQL.
+
+The GKE nodes run the application containers. The three backend Deployments and the frontend are configured for two replicas each. GKE pulls their images from private Artifact Registry repositories. Cloud NAT gives the private nodes outbound access when needed; Private Services Access connects the VPC privately to Cloud SQL.
+
+| GCP component | What it does in this deployment |
+|---|---|
+| GKE Standard cluster `blog-gke` | Runs Kubernetes and the application containers on worker nodes. |
+| Artifact Registry | Stores the four private container images. |
+| Cloud SQL for MySQL | Stores the auth, posts, and comments databases on a private IP. |
+| VPC, subnet, and secondary ranges | Provide private networking for GKE and Cloud SQL. |
+| Private Services Access | Connects the VPC to Cloud SQL without a public database IP. |
+| Cloud NAT | Lets private nodes make required outbound connections without public node IPs. |
+| GKE external passthrough Network Load Balancer | Provides the external IP and forwards traffic to the Ingress controller. |
+| NGINX Ingress Controller | Routes web requests to the frontend and API services by URL path. |
+| Cloud DNS and GoDaddy | Cloud DNS hosts records; GoDaddy delegates your domain to those records. |
+| cert-manager and Let's Encrypt | Obtain and renew the HTTPS certificate for the domain. |
+
+The remaining steps create these components in dependency order. At each checkpoint, confirm the result before moving on. The architecture diagram is in [`gcp/architecture-diagram.html`](../architecture-diagram.html).
+
+## 2. Before starting
 
 You need a Google account with project and billing permissions, a billing account, this repository cloned locally, and a domain you control for public DNS/HTTPS. Install Docker Desktop and switch it to **Linux containers**. Install Google Cloud CLI (`gcloud`), `kubectl`, and Helm on Windows. You will not run the website locally. Docker Desktop is only used to build container images from the GCP-local source folder; the images are pushed to Google Cloud. `gcloud`, `kubectl`, and Helm run the cloud/Kubernetes setup tasks that the Console does not conveniently provide.
 
@@ -45,9 +83,9 @@ docker info --format '{{.OSType}}'
 
 The second command should print `linux`; images below target `linux/amd64`.
 
-## 2. Choose project values
+## 3. Choose project values
 
-Record the values you already know: your registered domain (without `https://`), email for Let's Encrypt, and region `asia-south1`. To find your current public IPv4 address, open a browser and search `what is my IP`; record the IPv4 result and add `/32` when you enter it in Step 9. You will record the Project ID in Step 3. Some values do not exist yet; collect those from the indicated later step. Never run a command with a placeholder still in it. Replace each placeholder with the real value, without the angle brackets. Do not save or commit passwords.
+Record the values you already know: your registered domain (without `https://`), email for Let's Encrypt, and region `asia-south1`. To find your current public IPv4 address, open a browser and search `what is my IP`; record the IPv4 result and add `/32` when you enter it in Step 10. You will record the Project ID in Step 4. Some values do not exist yet; collect those from the indicated later step. Never run a command with a placeholder still in it. Replace each placeholder with the real value, without the angle brackets. Do not save or commit passwords.
 
 ### Value hand-off list
 
@@ -55,24 +93,24 @@ Keep this table open while you work. After each source step, copy its result int
 
 | Value to record | Where you get it | Where you use it |
 |---|---|---|
-| `<PROJECT_ID>` | Step 3: project selector / project details in Cloud Console | Step 7: Docker image names; Step 10: `gcloud get-credentials`; Step 11: GCP manifest image paths |
-| `<DOMAIN>` and `<EMAIL>` | Step 2: your registered domain and email address | Step 17: Cloud DNS zone and GoDaddy; Step 18: Ingress host rules and ClusterIssuer email |
-| `<YOUR_PUBLIC_IP>` | Step 2: your current internet public IP (include `/32`) | Step 9: GKE control-plane authorized networks |
-| `<SQL_PRIVATE_IP>` | Step 8: Cloud SQL instance overview, after it is RUNNABLE | Steps 12 and 13: database Secret and connectivity check |
-| SQL admin password | Step 8: when you create the `admin` database user; keep it private | Step 12: type it at the secure PowerShell prompt; Step 14 Jobs use the resulting Secret |
-| GKE node service account email | Step 9: node pool details | Step 10: grant Artifact Registry Reader |
-| `<INGRESS_IP>` | Step 16: the reserved regional static IP address | Step 16: `ingress-nginx-values.yaml`; Step 17: both Cloud DNS A records and DNS checks |
-| Four Cloud DNS name servers | Step 17 Part A: Cloud DNS zone **Registrar setup** | Step 17 Part B: GoDaddy custom nameserver setting |
+| `<PROJECT_ID>` | Step 4: project selector / project details in Cloud Console | Step 8: Docker image names; Step 11: `gcloud get-credentials`; Step 12: GCP manifest image paths |
+| `<DOMAIN>` and `<EMAIL>` | Step 3: your registered domain and email address | Step 18: Cloud DNS zone and GoDaddy; Step 19: Ingress host rules and ClusterIssuer email |
+| `<YOUR_PUBLIC_IP>` | Step 3: your current internet public IP (include `/32`) | Step 10: GKE control-plane authorized networks |
+| `<SQL_PRIVATE_IP>` | Step 9: Cloud SQL instance overview, after it is RUNNABLE | Steps 13 and 14: database Secret and connectivity check |
+| SQL admin password | Step 9: when you create the `admin` database user; keep it private | Step 13: type it at the secure PowerShell prompt; Step 15 Jobs use the resulting Secret |
+| GKE node service account email | Step 10: node pool details | Step 11: grant Artifact Registry Reader |
+| `<INGRESS_IP>` | Step 17: the reserved regional static IP address | Step 17: `ingress-nginx-values.yaml`; Step 18: both Cloud DNS A records and DNS checks |
+| Four Cloud DNS name servers | Step 18 Part A: Cloud DNS zone **Registrar setup** | Step 18 Part B: GoDaddy custom nameserver setting |
 
-The literal placeholder `<SQL_PASSWORD>` appears only in the optional SQL grant example in Step 8. Use your actual chosen password in Cloud SQL Studio; do not put it in a source file.
+The literal placeholder `<SQL_PASSWORD>` appears only in the optional SQL grant example in Step 9. Use your actual chosen password in Cloud SQL Studio; do not put it in a source file.
 
-## 3. Prepare the Google Cloud project
+## 4. Prepare the Google Cloud project
 
 In Google Cloud Console, select/create the project and link billing. Copy the exact **Project ID** shown in the project selector or project details; later Docker and `gcloud` commands require this ID, not the project display name. Under **APIs & Services → Library**, enable Kubernetes Engine, Artifact Registry, Cloud SQL Admin, Compute Engine, Cloud DNS (`dns.googleapis.com`), Service Networking, and Cloud Resource Manager APIs. If the Console prompts to enable another API during resource creation, enable it for this project. Under **Billing → Budgets & alerts**, create an alert at an amount you can afford. An alert does not cap spending.
 
 **Checkpoint:** correct project selected and billing enabled.
 
-## 4. Create the VPC and subnet in the Console
+## 5. Create the VPC and subnet in the Console
 
 A VPC is the private network shared by GKE and Cloud SQL.
 
@@ -84,7 +122,7 @@ A VPC is the private network shared by GKE and Cloud SQL.
 
 **Checkpoint:** VPC and subnet show the primary and secondary ranges, and Private Google Access is enabled.
 
-## 5. Set up private access and Cloud NAT in the Console
+## 6. Set up private access and Cloud NAT in the Console
 
 Cloud SQL private IP requires Private Services Access. Cloud NAT provides outbound internet access to private nodes without giving each node a public IP.
 
@@ -94,15 +132,15 @@ Cloud SQL private IP requires Private Services Access. Cloud NAT provides outbou
 
 **Checkpoint:** PSA connection is established and Cloud NAT is attached to the VPC in the selected region.
 
-## 6. Create Artifact Registry repositories in the Console
+## 7. Create Artifact Registry repositories in the Console
 
 Artifact Registry stores the private container images. In **Artifact Registry → Repositories → Create repository**, create four **Docker**, **Standard**, regional repositories in `asia-south1`: `blog-frontend`, `blog-auth-service`, `blog-post-service`, and `blog-comment-service`. Then open **IAM & Admin → IAM**, choose **Grant access**, enter the Google account you will use with `gcloud auth login`, and grant **Artifact Registry Writer** (`roles/artifactregistry.writer`) so your computer can upload images.
 
 **Checkpoint:** four repositories appear. They are empty until you push images.
 
-## 7. Build and push images with Docker Desktop
+## 8. Build and push images with Docker Desktop
 
-The Console cannot build from your local source tree. Open PowerShell at the repository root. Before running the following block, replace `<PROJECT_ID>` with the ID you copied in Step 3 and remove the angle brackets. Sign in and configure Docker credentials:
+The Console cannot build from your local source tree. Open PowerShell at the repository root. Before running the following block, replace `<PROJECT_ID>` with the ID you copied in Step 4 and remove the angle brackets. Sign in and configure Docker credentials:
 
 ```powershell
 gcloud auth login
@@ -110,7 +148,7 @@ gcloud config set project <PROJECT_ID>
 gcloud auth configure-docker asia-south1-docker.pkg.dev
 ```
 
-Before running this block, replace every `<PROJECT_ID>` with the Project ID recorded in Step 3. Do not leave angle brackets in image names. Build and push each image (repository paths must match the Artifact Registry names):
+Before running this block, replace every `<PROJECT_ID>` with the Project ID recorded in Step 4. Do not leave angle brackets in image names. Build and push each image (repository paths must match the Artifact Registry names):
 
 ```powershell
 docker build --platform linux/amd64 -t asia-south1-docker.pkg.dev/<PROJECT_ID>/blog-auth-service/blog-auth-service:latest ./gcp/application/services/auth-service
@@ -127,10 +165,10 @@ The GCP-local frontend copy has `VITE_API_URL` empty in its `.env.production`; t
 
 **Checkpoint:** each Artifact Registry repository shows an image. If push is denied, check your user has Artifact Registry Writer and rerun `gcloud auth configure-docker`.
 
-## 8. Create Cloud SQL for MySQL in the Console
+## 9. Create Cloud SQL for MySQL in the Console
 
 1. In **Cloud SQL → Create instance → MySQL**, choose MySQL 8.0, instance ID `blog-mysql`, a strong root password, region `asia-south1`, and a small single-zone configuration suitable for a lab. High availability costs more.
-2. In connections select **Private IP** and network `blog-vpc`. PSA from Step 5 must be established. Do not enable public IP.
+2. In connections select **Private IP** and network `blog-vpc`. PSA from Step 6 must be established. Do not enable public IP.
 3. Choose a suitable small storage size and create the instance. Wait until `RUNNABLE`; record its private IP.
 4. Create a database user `admin` with a strong password and databases `auth_db`, `posts_db`, and `comments_db`.
 5. In Cloud SQL Studio connect as root and, if required, grant the application account access (replace password):
@@ -147,21 +185,21 @@ Choose a URL-safe letters-and-numbers password to avoid URL-encoding problems in
 
 **Checkpoint:** instance is RUNNABLE, private IP is shown, and all three databases exist.
 
-## 9. Create GKE Standard in the Console
+## 10. Create GKE Standard in the Console
 
 GKE Standard is the managed Kubernetes cluster. Its worker nodes are Compute Engine VMs. This setup uses private worker IPs and spreads the regional cluster across three zones.
 
 1. Open **Kubernetes Engine → Clusters → Create → GKE Standard**.
-2. In **Cluster basics**, enter name `blog-gke`, choose **Regional**, region `asia-south1`, and the **Regular** release channel. In the Kubernetes version control, select a supported `1.35.x` patch version if the Console offers one; Step 16 explains why. Do not automatically accept a newer default version for this learning setup.
+2. In **Cluster basics**, enter name `blog-gke`, choose **Regional**, region `asia-south1`, and the **Regular** release channel. In the Kubernetes version control, select a supported `1.35.x` patch version if the Console offers one; Step 17 explains why. Do not automatically accept a newer default version for this learning setup.
 3. Under **Networking**, select VPC `blog-vpc` and subnet `blog-subnet`. Enable VPC-native traffic, then assign the existing Pod secondary range `blog-pods` and Service secondary range `blog-services`.
-4. Under **Security / Access**, enable **Private nodes**. Keep the control-plane external endpoint enabled so your computer can administer the cluster, then enable control-plane authorized networks and add the public IP you recorded in Step 2 as `<YOUR_PUBLIC_IP>/32` (replace the placeholder and include `/32`). This exposes only the management endpoint to your IP; it does not make the worker nodes public. Do not use `0.0.0.0/0`.
-5. Configure the first/default node pool as `blog-workers`. Select three zones in `asia-south1`, machine type `e2-medium`, and set **Number of nodes per zone** to `1` (three worker VMs total). Regional GKE Standard clusters can default to three nodes per zone, or nine total, so check this field carefully. Leave node autoscaling off for this fixed-size lab. Use the default node service account and note its email for Step 10.
+4. Under **Security / Access**, enable **Private nodes**. Keep the control-plane external endpoint enabled so your computer can administer the cluster, then enable control-plane authorized networks and add the public IP you recorded in Step 3 as `<YOUR_PUBLIC_IP>/32` (replace the placeholder and include `/32`). This exposes only the management endpoint to your IP; it does not make the worker nodes public. Do not use `0.0.0.0/0`.
+5. Configure the first/default node pool as `blog-workers`. Select three zones in `asia-south1`, machine type `e2-medium`, and set **Number of nodes per zone** to `1` (three worker VMs total). Regional GKE Standard clusters can default to three nodes per zone, or nine total, so check this field carefully. Leave node autoscaling off for this fixed-size lab. Use the default node service account and note its email for Step 11.
 6. Ensure the HTTP load balancing and metrics / Horizontal Pod Autoscaling support are enabled. Create the cluster and wait for status **Ready**.
 
 **Checkpoint:** cluster `blog-gke` is Ready, has three private worker nodes total (one per selected zone), and your current public IP is on the control-plane authorized networks list.
-## 10. Install local tools and connect
+## 11. Install local tools and connect
 
-Install `gcloud`, `kubectl`, and Helm if missing. In **IAM & Admin → IAM**, grant the GKE node service account email you recorded in Step 9 **Artifact Registry Reader** (`roles/artifactregistry.reader`); this allows nodes to pull images and is separate from your image push permission. Before running the command below, replace `<PROJECT_ID>` with the Step 3 value and remove the brackets.
+Install `gcloud`, `kubectl`, and Helm if missing. In **IAM & Admin → IAM**, grant the GKE node service account email you recorded in Step 10 **Artifact Registry Reader** (`roles/artifactregistry.reader`); this allows nodes to pull images and is separate from your image push permission. Before running the command below, replace `<PROJECT_ID>` with the Step 4 value and remove the brackets.
 
 ```powershell
 gcloud container clusters get-credentials blog-gke --region asia-south1 --project <PROJECT_ID>
@@ -170,12 +208,12 @@ kubectl get nodes
 
 **Checkpoint:** three nodes show `Ready`. If forbidden/unreachable, check your current IP is authorized and refresh credentials.
 
-## 11. Set image names in the GCP manifests
+## 12. Set image names in the GCP manifests
 
-In VS Code Find in Files, scope search to `gcp/k8s/` and replace every `YOUR_PROJECT_ID` with the exact Project ID recorded in Step 3. Confirm the image paths begin with `asia-south1-docker.pkg.dev/` followed by your real project ID and repository names. Save the files. Do not edit root `k8s/`; leave `YOUR_DOMAIN` and `YOUR_EMAIL` for Step 18.
-## 12. Create the namespace and database Secret
+In VS Code Find in Files, scope search to `gcp/k8s/` and replace every `YOUR_PROJECT_ID` with the exact Project ID recorded in Step 4. Confirm the image paths begin with `asia-south1-docker.pkg.dev/` followed by your real project ID and repository names. Save the files. Do not edit root `k8s/`; leave `YOUR_DOMAIN` and `YOUR_EMAIL` for Step 19.
+## 13. Create the namespace and database Secret
 
-A Kubernetes Secret stores connection strings without putting them in YAML. Use Cloud SQL's private IP. Run from the repository root in PowerShell. First replace `<SQL_PRIVATE_IP>` in each of the three URL lines with the actual private IP recorded in Step 8; remove the angle brackets. When PowerShell prompts, type the same Cloud SQL `admin` password you created in Step 8. The command then constructs the three database URLs and saves them in the Kubernetes Secret.
+A Kubernetes Secret stores connection strings without putting them in YAML. Use Cloud SQL's private IP. Run from the repository root in PowerShell. First replace `<SQL_PRIVATE_IP>` in each of the three URL lines with the actual private IP recorded in Step 9; remove the angle brackets. When PowerShell prompts, type the same Cloud SQL `admin` password you created in Step 9. The command then constructs the three database URLs and saves them in the Kubernetes Secret.
 
 ```powershell
 kubectl apply -f gcp/k8s/namespace.yaml
@@ -194,9 +232,9 @@ Remove-Variable plainPassword,authUrl,postsUrl,commentsUrl,jwtPlain -ErrorAction
 
 Do not share the terminal while entering secrets. Confirm only the Secret name (not contents): `kubectl get secret blog-secrets -n blog`.
 
-## 13. Check private database connectivity
+## 14. Check private database connectivity
 
-Replace `<SQL_PRIVATE_IP>` with the private IP recorded in Step 8 before running. This ephemeral utility pod checks the network route to MySQL (not the password):
+Replace `<SQL_PRIVATE_IP>` with the private IP recorded in Step 9 before running. This ephemeral utility pod checks the network route to MySQL (not the password):
 
 ```powershell
 kubectl run db-network-check -n blog --rm -it --restart=Never --image=busybox:1.36 -- nc -vz <SQL_PRIVATE_IP> 3306
@@ -204,7 +242,7 @@ kubectl run db-network-check -n blog --rm -it --restart=Never --image=busybox:1.
 
 If it times out, check VPC, subnet, private IP, and PSA. Do not expose Cloud SQL publicly to work around a private-routing problem.
 
-## 14. Create database tables with Prisma Jobs
+## 15. Create database tables with Prisma Jobs
 
 Run the three one-off jobs before starting services:
 
@@ -215,7 +253,7 @@ kubectl get jobs,pods -n blog
 
 Wait for all three Jobs to show `1/1` completions. For a failure, inspect e.g. `kubectl logs job/prisma-push-auth -n blog`. Check connection strings, credentials, grants, and database names.
 
-## 15. Deploy the four applications
+## 16. Deploy the four applications
 
 The three backend HPAs keep at least two replicas and can scale up to five based on CPU; the frontend remains at two. Apply each file explicitly so it is clear what is being created.
 
@@ -243,13 +281,21 @@ kubectl rollout status deployment/comment-service -n blog
 kubectl rollout status deployment/frontend -n blog
 ```
 
-**Checkpoint:** four Deployments are available, with eight application pods Ready (two per application). If a rollout stalls, inspect `kubectl describe pod <POD_NAME> -n blog` and `kubectl logs <POD_NAME> -n blog`.
+Before installing ingress, call the post API from inside the cluster. This checks that Kubernetes service discovery works and that the post service can reach its database:
 
-## 16. Reserve the ingress IP and install NGINX Ingress
+```powershell
+kubectl run api-check --rm -i --restart=Never -n blog --image=curlimages/curl:8.10.1 --command -- curl -sS http://post-service:3002/api/posts
+```
+
+On a new database, expect a JSON response with an empty `posts` list and pagination details. If the command fails, check `kubectl logs deployment/post-service -n blog` and verify the Prisma job completed before continuing. The temporary curl image must be pulled from Docker Hub, so the private nodes need working Cloud NAT egress.
+
+**Checkpoint:** four Deployments are available, with eight application pods Ready (two per application), and the internal API call returns the expected JSON. If a rollout stalls, inspect `kubectl describe pod <POD_NAME> -n blog` and `kubectl logs <POD_NAME> -n blog`.
+
+## 17. Reserve the ingress IP and install NGINX Ingress
 
 NGINX Ingress routes web paths to the app's ClusterIP Services. Its `LoadBalancer` Service asks GKE to create the external passthrough Network Load Balancer. Reserve the address before installing the controller so GKE creates the load balancer with the permanent IP from the start.
 
-**Compatibility and lifecycle caveat:** the community ingress-nginx project was retired and archived in March 2026. Its final chart, `4.15.1`, was tested through Kubernetes 1.35; GKE Regular currently defaults to 1.36.x. That is why Step 9 asks you to select a supported 1.35.x cluster version when available. GKE may later auto-upgrade the cluster, and this retired controller will not receive fixes. This is for a short learning deployment only. If the Console does not offer a 1.35.x version, stop before creating billable resources and review a supported ingress alternative/version plan. For production, use a maintained controller and update the design.
+**Compatibility and lifecycle caveat:** the community ingress-nginx project was retired and archived in March 2026. Its final chart, `4.15.1`, was tested through Kubernetes 1.35; GKE Regular currently defaults to 1.36.x. That is why Step 10 asks you to select a supported 1.35.x cluster version when available. GKE may later auto-upgrade the cluster, and this retired controller will not receive fixes. This is for a short learning deployment only. If the Console does not offer a 1.35.x version, stop before creating billable resources and review a supported ingress alternative/version plan. For production, use a maintained controller and update the design.
 
 ### Reserve the address in the Console
 
@@ -274,9 +320,9 @@ kubectl get service ingress-nginx-controller -n ingress-nginx
 
 Wait until `EXTERNAL-IP` shows the same address you reserved. If it stays `<pending>`, check GKE events, the address region, IP/forwarding-rule quota, and that the address is not already in use. Do not continue to DNS until the Service shows the reserved IP.
 
-## 17. Use GoDaddy and Cloud DNS
+## 18. Use GoDaddy and Cloud DNS
 
-This is the GCP equivalent of the AWS walkthrough's Route 53 plus GoDaddy setup. GoDaddy remains the **domain registrar** (where you bought the domain). Cloud DNS becomes the **authoritative DNS host** (the service that publishes the domain's DNS records). The GKE load balancer uses the reserved IP from Step 16.
+This is the GCP equivalent of the AWS walkthrough's Route 53 plus GoDaddy setup. GoDaddy remains the **domain registrar** (where you bought the domain). Cloud DNS becomes the **authoritative DNS host** (the service that publishes the domain's DNS records). The GKE load balancer uses the reserved IP from Step 17.
 
 ### Part A: create a public Cloud DNS zone and records
 
@@ -284,7 +330,7 @@ This is the GCP equivalent of the AWS walkthrough's Route 53 plus GoDaddy setup.
 2. Choose **Public zone**. Name it `blog-public-zone`; set DNS name to your domain, such as `example.com.` (include the final dot if the form requires it).
 3. Leave DNSSEC off for this learning setup. Create the zone.
 4. Open the zone details. Google creates NS and SOA records automatically. Open **Registrar setup** and copy all four Google name servers exactly as displayed. Do not edit the generated NS records.
-5. Add two standard `A` records in this zone (not an Alias). The record name for the apex is blank or `@`, depending on the Console form. Both point to the reserved GKE IP from Step 16:
+5. Add two standard `A` records in this zone (not an Alias). The record name for the apex is blank or `@`, depending on the Console form. Both point to the reserved GKE IP from Step 17:
 
 | DNS name | Type | IPv4 address |
 |---|---|---|
@@ -309,7 +355,7 @@ If DNSSEC was enabled at GoDaddy or the previous DNS host, disable or update the
 
 ### Part C: verify the delegation and address records
 
-Nameserver changes can take time to propagate. Use the domain recorded in Step 2 (replace `<DOMAIN>` without angle brackets). In PowerShell, check the registered name servers and both hostnames:
+Nameserver changes can take time to propagate. Use the domain recorded in Step 3 (replace `<DOMAIN>` without angle brackets). In PowerShell, check the registered name servers and both hostnames:
 
 ```powershell
 Resolve-DnsName -Type NS <DOMAIN> -Server 8.8.8.8
@@ -323,7 +369,7 @@ The NS answer should show the Cloud DNS name servers, and both A answers should 
 
 ---
 
-## 18. Enable HTTPS with cert-manager
+## 19. Enable HTTPS with cert-manager
 
 Install cert-manager and wait for its components:
 
@@ -332,7 +378,7 @@ kubectl apply -f https://github.com/cert-manager/cert-manager/releases/download/
 kubectl wait --for=condition=Available deployment --all -n cert-manager --timeout=300s
 ```
 
-Use the domain and email you recorded in Step 2. In `gcp/k8s/cluster-issuer.yaml`, replace `YOUR_EMAIL` with your real email. In `gcp/k8s/ingress.yaml`, replace every `YOUR_DOMAIN` with your domain only (for example `example.com`; no `https://`). Save both files. Check the root host is `<DOMAIN>` and the second host is `www.<DOMAIN>`, then apply:
+Use the domain and email you recorded in Step 3. In `gcp/k8s/cluster-issuer.yaml`, replace `YOUR_EMAIL` with your real email. In `gcp/k8s/ingress.yaml`, replace every `YOUR_DOMAIN` with your domain only (for example `example.com`; no `https://`). Save both files. Check the root host is `<DOMAIN>` and the second host is `www.<DOMAIN>`, then apply:
 
 ```powershell
 kubectl apply -f gcp/k8s/cluster-issuer.yaml
@@ -349,19 +395,32 @@ kubectl get certificate -n blog
 
 If the command times out, inspect `kubectl describe certificate bharathonlineshopping-tls -n blog` and `kubectl get challenges,orders -n blog`. Confirm public DNS points to the reserved IP, port 80 is reachable, the Ingress uses class `nginx`, and the issuer email is correct.
 
-## 19. Verify the application
+If a Challenge reports a **self-check timeout** or says the challenge URL cannot be reached, inspect the exact Challenge and cert-manager logs:
 
-Open `https://<DOMAIN>` and test signup/login, create a post, and add a comment. Optionally query the posts API:
+```powershell
+kubectl get challenges -n blog
+kubectl describe challenge <CHALLENGE_NAME> -n blog
+kubectl logs deployment/cert-manager -n cert-manager --tail=100
+```
+
+Check that the challenge's domain resolves publicly to `<INGRESS_IP>`, that the temporary HTTP-01 solver is ready, and that the challenge URL is reachable on port 80 from outside and inside the cluster. cert-manager checks the challenge from inside the cluster before asking Let's Encrypt to validate it. Do not apply the EKS CoreDNS rewrite from the AWS walkthrough to GKE; first use the Challenge events and logs to identify the actual GKE networking or DNS failure.
+
+## 20. Verify the application
+
+Open both `https://<DOMAIN>` and `https://www.<DOMAIN>` in a browser and confirm each loads securely. On the main domain, test signup/login, create a post, and add a comment. Optionally query the posts API:
 
 ```powershell
 Invoke-RestMethod https://<DOMAIN>/api/posts
+Invoke-WebRequest https://www.<DOMAIN>/
 kubectl get deployments,pods,services,ingress,hpa -n blog
 kubectl describe ingress blog-ingress -n blog
+kubectl get certificate bharathonlineshopping-tls -n blog
+kubectl describe certificate bharathonlineshopping-tls -n blog
 ```
 
-Expected flow: Cloud DNS → external load balancer → NGINX paths → app services and pods → separate Cloud SQL databases over private IP.
+The certificate should show `READY True` and cover both `<DOMAIN>` and `www.<DOMAIN>`. Expected flow: Cloud DNS → external load balancer → NGINX paths → app services and pods → separate Cloud SQL databases over private IP.
 
-## 20. Clean up
+## 21. Clean up
 
 Delete resources when finished to stop ongoing charges. Back up data first if needed.
 
@@ -376,7 +435,7 @@ kubectl delete -f https://github.com/cert-manager/cert-manager/releases/download
 
 Then in the Console remove, in order: if keeping the domain, first recreate its needed DNS records at the DNS provider you will keep and change GoDaddy nameservers there; only after delegation has moved, delete the Cloud DNS zone. Delete the Cloud SQL instance after export/backup; delete Artifact Registry repositories; delete the GKE cluster and wait for its load balancers to disappear; release the reserved `blog-ingress-ip`; delete Cloud NAT gateway and router; delete the Private Services Access connection and allocated range; finally delete the VPC/subnet after all attached resources are gone. Review Billing after deletion for retained IPs, disks, backups, and snapshots. Do not delete the whole project unless that is intentional.
 
-## 21. Troubleshooting
+## 22. Troubleshooting
 
 | Symptom | Check first |
 |---|---|
