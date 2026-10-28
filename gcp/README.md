@@ -1,6 +1,6 @@
 ﻿# GCP deployment track
 
-This folder contains the GCP architecture, beginner-oriented deployment walkthrough, and GCP-specific Kubernetes manifests for the existing blog microservices project. Application source and Dockerfiles remain shared in the repository root under `services/` and `frontend/`.
+This folder contains the GCP architecture, beginner-oriented deployment walkthrough, and GCP-specific Kubernetes manifests for the existing blog microservices project. GCP-local copies of application source and Dockerfiles live under `application/`; the AWS/root copies remain separate.
 
 ## Start here
 
@@ -21,4 +21,5 @@ The guide is Console-first. PowerShell, Docker Desktop, `gcloud`, `kubectl`, and
 | Kubernetes Secret | Secret in the `blog` namespace |
 | ECR image pull role | GKE node service account with Artifact Registry Reader permission |
 
-The AWS configuration and shared app source remain unchanged. The community ingress-nginx project is retired; it is retained for architecture parity and learning, not recommended for new production systems.
+The GCP application copy is in `application/`; it is not automatically synchronized with the root/AWS copy. Keep future GCP source edits in this directory or deliberately review copied updates. The AWS configuration and root app source remain unchanged. The community ingress-nginx project is retired; it is retained for architecture parity and learning, not recommended for new production systems.
+

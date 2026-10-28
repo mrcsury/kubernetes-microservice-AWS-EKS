@@ -2,5 +2,7 @@
   service:
     type: LoadBalancer
     externalTrafficPolicy: Local
+    loadBalancerIP: "YOUR_INGRESS_IP"
     annotations:
       cloud.google.com/l4-rbs: "enabled"
+
