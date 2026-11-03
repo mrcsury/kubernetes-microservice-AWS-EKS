@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: frontend
-          image: asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/blog-frontend/blog-frontend:latest
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-frontend/blog-frontend:latest
           ports:
             - containerPort: 80
           resources:

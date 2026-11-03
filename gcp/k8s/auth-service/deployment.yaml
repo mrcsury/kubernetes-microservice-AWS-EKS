@@ -15,7 +15,7 @@ spec:
     spec:
       containers:
         - name: auth-service
-          image: asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/blog-auth-service/blog-auth-service:latest
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-auth-service/blog-auth-service:latest
           command: ["sh", "-c", "node dist/index.js"]
           ports:
             - containerPort: 3001

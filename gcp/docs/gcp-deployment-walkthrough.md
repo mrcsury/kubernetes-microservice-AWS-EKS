@@ -210,7 +210,7 @@ kubectl get nodes
 
 ## 12. Set image names in the GCP manifests
 
-In VS Code Find in Files, scope search to `gcp/k8s/` and replace every `YOUR_PROJECT_ID` with the exact Project ID recorded in Step 4. Confirm the image paths begin with `asia-south1-docker.pkg.dev/` followed by your real project ID and repository names. Save the files. Do not edit root `k8s/`; leave `YOUR_DOMAIN` and `YOUR_EMAIL` for Step 19.
+In VS Code Find in Files, scope search to `gcp/k8s/` and replace every `project-5d14303c-195f-4cf8-8be` with the exact Project ID recorded in Step 4. Confirm the image paths begin with `asia-south1-docker.pkg.dev/` followed by your real project ID and repository names. Save the files. Do not edit root `k8s/`; leave `YOUR_DOMAIN` and `YOUR_EMAIL` for Step 19.
 ## 13. Create the namespace and database Secret
 
 A Kubernetes Secret stores connection strings without putting them in YAML. Use Cloud SQL's private IP. Run from the repository root in PowerShell. First replace `<SQL_PRIVATE_IP>` in each of the three URL lines with the actual private IP recorded in Step 9; remove the angle brackets. When PowerShell prompts, type the same Cloud SQL `admin` password you created in Step 9. The command then constructs the three database URLs and saves them in the Kubernetes Secret.

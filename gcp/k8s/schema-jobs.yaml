@@ -5,13 +5,13 @@ metadata:
   namespace: blog
 spec:
   backoffLimit: 2
-  ttlSecondsAfterFinished: 600
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: OnFailure
       containers:
         - name: prisma-push
-          image: asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/blog-auth-service/blog-auth-service:latest
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-auth-service/blog-auth-service:latest
           command: ["npx", "prisma", "db", "push", "--skip-generate"]
           env:
             - name: DATABASE_URL
@@ -33,7 +33,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: prisma-push
-          image: asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/blog-post-service/blog-post-service:latest
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-post-service/blog-post-service:latest
           command: ["npx", "prisma", "db", "push", "--skip-generate"]
           env:
             - name: DATABASE_URL
@@ -55,7 +55,7 @@ spec:
       restartPolicy: OnFailure
       containers:
         - name: prisma-push
-          image: asia-south1-docker.pkg.dev/YOUR_PROJECT_ID/blog-comment-service/blog-comment-service:latest
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-comment-service/blog-comment-service:latest
           command: ["npx", "prisma", "db", "push", "--skip-generate"]
           env:
             - name: DATABASE_URL
