@@ -27,7 +27,7 @@ metadata:
   namespace: blog
 spec:
   backoffLimit: 2
-  ttlSecondsAfterFinished: 600
+  ttlSecondsAfterFinished: 3600
   template:
     spec:
       restartPolicy: OnFailure
