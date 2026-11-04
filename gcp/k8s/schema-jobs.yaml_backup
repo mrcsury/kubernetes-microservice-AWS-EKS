@@ -1,0 +1,65 @@
+﻿apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prisma-push-auth
+  namespace: blog
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: prisma-push
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-auth-service/blog-auth-service:latest
+          command: ["npx", "prisma", "db", "push", "--skip-generate"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secrets
+                  key: db-auth-url
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prisma-push-posts
+  namespace: blog
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 3600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: prisma-push
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-post-service/blog-post-service:latest
+          command: ["npx", "prisma", "db", "push", "--skip-generate"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secrets
+                  key: db-posts-url
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: prisma-push-comments
+  namespace: blog
+spec:
+  backoffLimit: 2
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: prisma-push
+          image: asia-south1-docker.pkg.dev/project-5d14303c-195f-4cf8-8be/blog-comment-service/blog-comment-service:latest
+          command: ["npx", "prisma", "db", "push", "--skip-generate"]
+          env:
+            - name: DATABASE_URL
+              valueFrom:
+                secretKeyRef:
+                  name: blog-secrets
+                  key: db-comments-url
